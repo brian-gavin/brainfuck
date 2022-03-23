@@ -8,15 +8,12 @@ where
     I: Iterator<Item = char>,
 {
     input: I,
-    jumps: Vec<usize>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Instruction {
-    MovePointerLeft,
-    MovePointerRight,
-    Increment,
-    Decrement,
+    MovePointer(isize),
+    Add(isize),
     Input,
     Output,
     JumpIfZero(usize),
@@ -28,41 +25,74 @@ where
     I: Iterator<Item = char>,
 {
     pub fn new(input: I) -> Compiler<I> {
-        Compiler {
-            input,
-            jumps: vec![],
-        }
+        Compiler { input }
     }
 
     pub fn compile(mut self) -> Vec<Instruction> {
         use Instruction::*;
         let mut v = vec![];
+        let mut check_jumps = vec![];
         while let Some(c) = self.input.next() {
             match c {
-                '>' => v.push(MovePointerRight),
-                '<' => v.push(MovePointerLeft),
-                '+' => v.push(Increment),
-                '-' => v.push(Decrement),
+                '>' => v.push(MovePointer(1)),
+                '<' => v.push(MovePointer(-1)),
+                '+' => v.push(Add(1)),
+                '-' => v.push(Add(-1)),
                 '.' => v.push(Output),
                 ',' => v.push(Input),
                 '[' => {
                     // push sentinel and mark it's index as unmatched
                     v.push(JumpIfZero(0));
-                    // jump target is the index of this value
-                    self.jumps.push(v.len() - 1);
+                    // push sentinel value to jump stack, fixing is done later.
+                    check_jumps.push(());
                 }
                 ']' => {
-                    // pop the last value from the jumps stack to pair the jumps
-                    let pair = self.jumps.pop().expect("syntax error: unmatched ']'");
-                    v.push(JumpIfNonZero(pair));
-                    let jump_target = v.len(); // jump to one-after this instr
-                    v[pair] = JumpIfZero(jump_target);
+                    // pop sentinel value from jump stack to check syntax.
+                    let _ = check_jumps.pop().expect("syntax error: unmatched ']'");
+                    // push sentinel value, will be fixedx later.
+                    v.push(JumpIfNonZero(0));
                 }
                 _ => (),
             }
         }
+        v = repeated_instructions_pass(v);
+
         v
     }
+}
+
+fn repeated_instructions_pass(instrs: Vec<Instruction>) -> Vec<Instruction> {
+    use Instruction::*;
+    let mut instrs = instrs.into_iter();
+    let mut v = Vec::with_capacity(instrs.len());
+    match instrs.next() {
+        Some(first) => v.push(first),
+        None => return v,
+    }
+    while let Some(i) = instrs.next() {
+        match (v.last_mut().unwrap(), i) {
+            (MovePointer(n), MovePointer(m)) | (Add(n), Add(m)) => *n += m,
+            _ => v.push(i),
+        }
+    }
+    // fix jumps after the pass
+    let mut jump_pairs = HashMap::new();
+    let mut jumps = vec![];
+    for (idx, instr) in v.iter().enumerate() {
+        match instr {
+            JumpIfZero(_) => jumps.push(idx),
+            JumpIfNonZero(_) => {
+                let pair = jumps.pop().expect("unmatched [] after passes.");
+                jump_pairs.insert(pair, idx);
+            }
+            _ => (),
+        }
+    }
+    for (p1, p2) in jump_pairs.into_iter() {
+        v[p1] = JumpIfZero(p2);
+        v[p2] = JumpIfNonZero(p1);
+    }
+    v
 }
 
 type Cell = u8;
@@ -117,15 +147,20 @@ impl VM {
         use Instruction::*;
         while let Some(instr) = self.fetch() {
             match instr {
-                MovePointerLeft => self.ptr = self.ptr.wrapping_sub(1),
-                MovePointerRight => self.ptr = self.ptr.wrapping_add(1),
-                Increment => {
-                    let cell = self.get_cell_mut(self.ptr);
-                    *cell = cell.wrapping_add(1);
+                MovePointer(n) => {
+                    self.ptr = if n > 0 {
+                        self.ptr.wrapping_add(n.unsigned_abs())
+                    } else {
+                        self.ptr.wrapping_sub(n.unsigned_abs())
+                    }
                 }
-                Decrement => {
+                Add(n) => {
                     let cell = self.get_cell_mut(self.ptr);
-                    *cell = cell.wrapping_sub(1);
+                    *cell = if n > 0 {
+                        cell.wrapping_add(n.try_into().unwrap())
+                    } else {
+                        cell.wrapping_sub(n.unsigned_abs().try_into().unwrap())
+                    }
                 }
                 Input => {
                     self.cells.insert(self.ptr, VM::getchar());
@@ -143,5 +178,23 @@ impl VM {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_repeated_instructions_pass() {
+        use Instruction::*;
+        assert_eq!(
+            repeated_instructions_pass(vec![MovePointer(1), MovePointer(-1), MovePointer(1)]),
+            vec![MovePointer(1)]
+        );
+        assert_eq!(
+            repeated_instructions_pass(vec![Add(1), Add(1), Add(-1),]),
+            vec![Add(1)]
+        );
     }
 }
