@@ -1,6 +1,6 @@
 use std::{env, fs};
 
-use brainfuck::{Compiler, VM};
+use brainfuck::{compiler::Compiler, vm::VM};
 
 fn main() {
     let input = fs::read_to_string(env::args().nth(1).unwrap_or_default()).unwrap();
