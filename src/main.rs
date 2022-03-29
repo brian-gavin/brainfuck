@@ -10,6 +10,6 @@ fn main() {
     if cli.execute {
         VM::new(instrs).execute();
     } else if let Some(output) = cli.output {
-        fs::write(output, QBE::new(instrs).compile()).unwrap();
+        fs::write(output, QBE::new(instrs).compile().unwrap()).unwrap();
     }
 }

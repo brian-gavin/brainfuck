@@ -17,6 +17,8 @@ pub struct AppCli {
     pub file: String,
 }
 
+const NUM_CELLS: usize = 30_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Instruction {
     MovePointer(isize),
